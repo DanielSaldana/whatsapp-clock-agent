@@ -199,8 +199,9 @@ def fmt_dt(iso_value: str) -> str:
     dt = parse_iso(iso_value)
     if not dt:
         return "-"
-    return dt.strftime("%Y-%m-%d %I:%M %p UTC")
 
+    local_dt = dt.astimezone(ZoneInfo("America/Denver"))
+    return local_dt.strftime("%Y-%m-%d %I:%M %p")
 
 def fmt_minutes(total_minutes: int) -> str:
     total_minutes = int(total_minutes or 0)
