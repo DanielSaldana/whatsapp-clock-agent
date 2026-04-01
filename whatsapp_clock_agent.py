@@ -537,10 +537,8 @@ def handle_stateful_reply(phone: str, text: str):
         create_shift(phone, name, loc_description=text)
         clear_state(phone)
         return (
-            f"✅ Clock in saved for *{name}*.
-"
-            f"Site: {text or 'Not provided'}
-"
+            f"✅ Clock in saved for *{name}*."
+            f"Site: {text or 'Not provided'}"
             "Now send your WhatsApp location if you want GPS attached."
         )
 
@@ -565,12 +563,9 @@ def handle_stateful_reply(phone: str, text: str):
         if total is None:
             return "No open shift found. Send *in* first."
         return (
-            f"✅ Clock out saved.
-"
-            f"Lunch: {lunch_minutes} min
-"
-            f"Site: {text or 'Not provided'}
-"
+            f"✅ Clock out saved."
+            f"Lunch: {lunch_minutes} min"
+            f"Site: {text or 'Not provided'}"
             f"Worked: *{fmt_minutes(total)}*"
         )
 
@@ -873,12 +868,9 @@ def handle_command(phone: str, text: str):
         if not shift:
             return "You do not have an open shift. Send *in* to clock in."
         return (
-            f"Open shift found for *{shift['employee_name'] or 'Employee'}*.
-"
-            f"Date: {shift['date_local']}
-"
-            f"Clock in: {shift['clock_in_utc']} UTC
-"
+            f"Open shift found for *{shift['employee_name'] or 'Employee'}*."
+            f"Date: {shift['date_local']}"
+            f"Clock in: {shift['clock_in_utc']} UTC"
             f"Site: {shift['location_description_in'] or 'Not provided'}"
         )
 
@@ -957,12 +949,9 @@ def handle_command(phone: str, text: str):
         if total is None:
             return "No open shift found. Send *in* first."
         return (
-            f"✅ Offline clock out saved at *{manual_dt.strftime('%I:%M %p')}*.
-"
-            f"Lunch: {lunch_minutes} min
-"
-            f"Site: {site or 'Not provided'}
-"
+            f"✅ Offline clock out saved at *{manual_dt.strftime('%I:%M %p')}*."
+            f"Lunch: {lunch_minutes} min"
+            f"Site: {site or 'Not provided'}"
             f"Worked: *{fmt_minutes(total)}*"
         )
 
@@ -1002,16 +991,11 @@ def handle_command(phone: str, text: str):
             return "Could not save the shift. Try again."
 
         return (
-            f"✅ Shift saved in one message.
-"
-            f"In: *{in_dt.strftime('%I:%M %p')}*
-"
-            f"Out: *{out_dt.strftime('%I:%M %p')}*
-"
-            f"Lunch: {lunch_minutes} min
-"
-            f"Site: {site or 'Not provided'}
-"
+            f"✅ Shift saved in one message."
+            f"In: *{in_dt.strftime('%I:%M %p')}*"
+            f"Out: *{out_dt.strftime('%I:%M %p')}*"
+            f"Lunch: {lunch_minutes} min"
+            f"Site: {site or 'Not provided'}"
             f"Worked: *{fmt_minutes(total)}*"
         )
 
@@ -1025,14 +1009,10 @@ def handle_command(phone: str, text: str):
         parsed = extract_turno_payload(text[6:])
         if not parsed:
             return (
-                "Usa algo como:
-"
-                "*Turno 8:00 am 5:30 pm 30 lonche Rancho*
-"
-                "*Turno 8:00am 5:30pm 30min lonche Rancho*
-"
-                "*Turno 8:00-5:30 30min lonche Rancho*
-"
+                "Usa algo como:"
+                "*Turno 8:00 am 5:30 pm 30 lonche Rancho*"
+                "*Turno 8:00am 5:30pm 30min lonche Rancho*"
+                "*Turno 8:00-5:30 30min lonche Rancho*"
                 "*Turno 8 530 30 lonche Rancho*"
             )
 
@@ -1043,10 +1023,8 @@ def handle_command(phone: str, text: str):
 
         if not in_dt or not out_dt:
             return (
-                "No entendí bien la hora. Usa algo como:
-"
-                "*Turno 8:00 am 5:30 pm 30 lonche Rancho*
-"
+                "No entendí bien la hora. Usa algo como:"
+                "*Turno 8:00 am 5:30 pm 30 lonche Rancho*"
                 "o *Turno 8:00-5:30 30min lonche Rancho*"
             )
 
@@ -1059,16 +1037,11 @@ def handle_command(phone: str, text: str):
             return "No pude guardar el turno. Intenta otra vez."
 
         return (
-            f"✅ Turno guardado en un mensaje.
-"
-            f"Entrada: *{in_dt.strftime('%I:%M %p')}*
-"
-            f"Salida: *{out_dt.strftime('%I:%M %p')}*
-"
-            f"Lonche: {lunch_minutes} min
-"
-            f"Lugar: {site or 'No especificado'}
-"
+            f"✅ Turno guardado en un mensaje."
+            f"Entrada: *{in_dt.strftime('%I:%M %p')}*\"
+            f"Salida: *{out_dt.strftime('%I:%M %p')}*"
+            f"Lonche: {lunch_minutes} min"
+            f"Lugar: {site or 'No especificado'}"
             f"Total trabajado: *{fmt_minutes(total)}*"
         )
 
@@ -1127,9 +1100,7 @@ def handle_command(phone: str, text: str):
 ".join(lines)
 
     return (
-        "I did not understand that.
-
-"
+        "I did not understand that."
         f"{help_text()}"
     )
 
@@ -1169,12 +1140,9 @@ def handle_manual_out_description_state(phone: str, text: str):
         return "No open shift found. Send *in* first."
 
     return (
-        f"✅ Manual clock out saved at *{manual_dt.strftime('%I:%M %p')}*.
-"
-        f"Lunch: {lunch_minutes} min
-"
-        f"Site: {text or 'Not provided'}
-"
+        f"✅ Manual clock out saved at *{manual_dt.strftime('%I:%M %p')}*."
+        f"Lunch: {lunch_minutes} min"
+        f"Site: {text or 'Not provided'}"
         f"Worked: *{fmt_minutes(total)}*"
     )
 
