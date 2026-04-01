@@ -375,98 +375,47 @@ def build_excel(rows):
 
 # --- Simple turno parser (clean & minimal) ---
 def parse_turno_simple(text: str):
-    t = normalize_text(text).lower()
+    import re
+
+    t = text.lower().strip()
 
     if not any(t.startswith(x) for x in ["turno ", "turn ", "trno ", "truno ", "tuno "]):
         return None
 
-    payload = t.split(" ", 1)[1].strip() if " " in t else ""
-
-    replacements = {
-        "minutos": "min",
-        "mins": "min",
-        "minuto": "min",
-        "min": "min",
-        "lunch": "lonche",
-        "lonch": "lonche",
-        "lonce": "lonche",
-        "lonhce": "lonche",
-        "lonchee": "lonche",
-        "lounche": "lonche",
-    }
-
-    for k, v in replacements.items():
-        payload = payload.replace(k, v)
-
-    payload = payload.replace("–", "-").replace("—", "-")
-
-    import re
-
-    def normalize_time_token(token):
-        token = token.strip()
-
-        if token.isdigit() and len(token) in [3,4]:
-            h = token[:-2]
-            m = token[-2:]
-            return str(int(h)) + ":" + m
-
-        match = re.match(r"^(\d{1,4})(am|pm)$", token)
-        if match:
-            num, ampm = match.groups()
-            if len(num) in [3,4]:
-                h = num[:-2]
-                m = num[-2:]
-                return str(int(h)) + ":" + m + " " + ampm
-            return str(int(num)) + ":00 " + ampm
-
-        return token
-
-    if "-" in payload:
-        left, right = payload.split("-", 1)
-        left = normalize_time_token(left.strip())
-        right_parts = right.strip().split(" ", 1)
-        right_time = normalize_time_token(right_parts[0])
-        rest = right_parts[1] if len(right_parts) > 1 else ""
-        payload = (left + " " + right_time + " " + rest).strip()
-
-    # ❌ AQUÍ EMPIEZA EL PROBLEMA
-    t = normalize_text(text).lower()
-    if not t.startswith("turno "):
-        return None
-
-    payload = t[6:].strip()
-
-    payload = payload.replace("minutos", "min").replace("mins", "min")
-    payload = payload.replace("lunch", "lonche").replace("lonch", "lonche").replace("lonce", "lonche")
-
-    if "lonche" not in payload:
-        return None
-
-    before, after = payload.split("lonche", 1)
-    site = after.strip().title()
-
-    parts = before.strip().split()
-
     try:
-        if "-" in parts[0]:
-            start, end = parts[0].split("-")
-            lunch = parts[1]
-        else:
-            start = parts[0] + (" " + parts[1] if "am" in parts[1] or "pm" in parts[1] else "")
-            if "am" in parts[1] or "pm" in parts[1]:
-                end = parts[2] + " " + parts[3]
-                lunch = parts[4]
-            else:
-                end = parts[1]
-                lunch = parts[2]
+        t = t.replace("minutos", "min").replace("mins", "min")
+        t = t.replace("lunch", "lonche").replace("lonch", "lonche")
 
-        lunch = int("".join([c for c in lunch if c.isdigit()]))
+        if "lonche" not in t:
+            return None
+
+        before, after = t.split("lonche", 1)
+        site = after.strip().title()
+
+        raw = before.replace("turno", "").replace("turn", "").strip()
+        raw = raw.replace("-", " ")
+        parts = raw.split()
+
+        def fix_time(p1, p2=None):
+            if p2 and p2 in ["am", "pm"]:
+                return f"{p1} {p2}"
+            return p1
+
+        if "am" in parts or "pm" in parts:
+            start = fix_time(parts[0], parts[1])
+            end = fix_time(parts[2], parts[3])
+            lunch = parts[4]
+        else:
+            start = parts[0]
+            end = parts[1]
+            lunch = parts[2]
+
+        lunch = int(re.sub(r"\D", "", lunch))
 
         return start.strip(), end.strip(), lunch, site
 
     except:
         return None
-
 def help_text() -> str:
     return (
         "*Clock Agent Commands*\n\n"
