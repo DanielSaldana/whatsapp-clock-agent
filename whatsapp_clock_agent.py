@@ -646,18 +646,13 @@ def handle_command(phone: str, text: str):
         conn.close()
 
         return (
-            f"✅ Turno guardado en un mensaje.
-"
-            f"Entrada: *{in_dt.strftime('%I:%M %p')}*
-"
-            f"Salida: *{out_dt.strftime('%I:%M %p')}*
-"
-            f"Lonche: {lunch_minutes} min
-"
-            f"Lugar: {site}
-"
-            f"Total trabajado: *{fmt_minutes(total_minutes)}*"
-        )
+    f"✅ Turno guardado en un mensaje.\n"
+    f"Entrada: *{in_dt.strftime('%I:%M %p')}*\n"
+    f"Salida: *{out_dt.strftime('%I:%M %p')}*\n"
+    f"Lonche: {lunch_minutes} min\n"
+    f"Lugar: {site}\n"
+    f"Total trabajado: *{fmt_minutes(total_minutes)}*"
+)
 
     lower = text.lower().strip()
     name = get_employee_name(phone)
