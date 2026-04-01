@@ -377,13 +377,11 @@ def build_excel(rows):
 def parse_turno_simple(text: str):
     t = normalize_text(text).lower()
 
-    # tolerate typos for 'turno'
     if not any(t.startswith(x) for x in ["turno ", "turn ", "trno ", "truno ", "tuno "]):
         return None
 
     payload = t.split(" ", 1)[1].strip() if " " in t else ""
 
-    # normalize common variants / typos
     replacements = {
         "minutos": "min",
         "mins": "min",
@@ -396,24 +394,22 @@ def parse_turno_simple(text: str):
         "lonchee": "lonche",
         "lounche": "lonche",
     }
+
     for k, v in replacements.items():
         payload = payload.replace(k, v)
 
     payload = payload.replace("–", "-").replace("—", "-")
 
-    # --- normalize time formats ---
     import re
 
     def normalize_time_token(token):
         token = token.strip()
 
-        # 530 -> 5:30
         if token.isdigit() and len(token) in [3,4]:
             h = token[:-2]
             m = token[-2:]
             return str(int(h)) + ":" + m
 
-        # 8am / 530pm
         match = re.match(r"^(\d{1,4})(am|pm)$", token)
         if match:
             num, ampm = match.groups()
@@ -425,7 +421,6 @@ def parse_turno_simple(text: str):
 
         return token
 
-    # normalize dash times like 8-530 / 8-5:30 / 8am-5:30pm
     if "-" in payload:
         left, right = payload.split("-", 1)
         left = normalize_time_token(left.strip())
@@ -433,17 +428,17 @@ def parse_turno_simple(text: str):
         right_time = normalize_time_token(right_parts[0])
         rest = right_parts[1] if len(right_parts) > 1 else ""
         payload = (left + " " + right_time + " " + rest).strip()
+
+    # ❌ AQUÍ EMPIEZA EL PROBLEMA
     t = normalize_text(text).lower()
     if not t.startswith("turno "):
         return None
 
     payload = t[6:].strip()
 
-    # normalize common variants
     payload = payload.replace("minutos", "min").replace("mins", "min")
     payload = payload.replace("lunch", "lonche").replace("lonch", "lonche").replace("lonce", "lonche")
 
-    # split site by 'lonche'
     if "lonche" not in payload:
         return None
 
@@ -452,18 +447,11 @@ def parse_turno_simple(text: str):
 
     parts = before.strip().split()
 
-    # formats supported:
-    # 8:00 am 5:30 pm 30
-    # 8:00am 5:30pm 30
-    # 8:00-5:30 30min
-
     try:
         if "-" in parts[0]:
-            # format: 8:00-5:30
             start, end = parts[0].split("-")
             lunch = parts[1]
         else:
-            # format: 8:00 am 5:30 pm 30
             start = parts[0] + (" " + parts[1] if "am" in parts[1] or "pm" in parts[1] else "")
             if "am" in parts[1] or "pm" in parts[1]:
                 end = parts[2] + " " + parts[3]
@@ -475,6 +463,7 @@ def parse_turno_simple(text: str):
         lunch = int("".join([c for c in lunch if c.isdigit()]))
 
         return start.strip(), end.strip(), lunch, site
+
     except:
         return None
 
