@@ -372,6 +372,112 @@ def build_excel(rows):
 # -----------------------------
 # Message handling
 # -----------------------------
+
+# --- Simple turno parser (clean & minimal) ---
+def parse_turno_simple(text: str):
+    t = normalize_text(text).lower()
+
+    # tolerate typos for 'turno'
+    if not any(t.startswith(x) for x in ["turno ", "turn ", "trno ", "truno ", "tuno "]):
+        return None
+
+    payload = t.split(" ", 1)[1].strip() if " " in t else ""
+
+    # normalize common variants / typos
+    replacements = {
+        "minutos": "min",
+        "mins": "min",
+        "minuto": "min",
+        "min": "min",
+        "lunch": "lonche",
+        "lonch": "lonche",
+        "lonce": "lonche",
+        "lonhce": "lonche",
+        "lonchee": "lonche",
+        "lounche": "lonche",
+    }
+    for k, v in replacements.items():
+        payload = payload.replace(k, v)
+
+    payload = payload.replace("–", "-").replace("—", "-")
+
+    # --- normalize time formats ---
+    import re
+
+    def normalize_time_token(token):
+        token = token.strip()
+
+        # 530 -> 5:30
+        if token.isdigit() and len(token) in [3,4]:
+            h = token[:-2]
+            m = token[-2:]
+            return str(int(h)) + ":" + m
+
+        # 8am / 530pm
+        match = re.match(r"^(\d{1,4})(am|pm)$", token)
+        if match:
+            num, ampm = match.groups()
+            if len(num) in [3,4]:
+                h = num[:-2]
+                m = num[-2:]
+                return str(int(h)) + ":" + m + " " + ampm
+            return str(int(num)) + ":00 " + ampm
+
+        return token
+
+    # normalize dash times like 8-530 / 8-5:30 / 8am-5:30pm
+    if "-" in payload:
+        left, right = payload.split("-", 1)
+        left = normalize_time_token(left.strip())
+        right_parts = right.strip().split(" ", 1)
+        right_time = normalize_time_token(right_parts[0])
+        rest = right_parts[1] if len(right_parts) > 1 else ""
+        payload = (left + " " + right_time + " " + rest).strip()
+    t = normalize_text(text).lower()
+    if not t.startswith("turno "):
+        return None
+
+    payload = t[6:].strip()
+
+    # normalize common variants
+    payload = payload.replace("minutos", "min").replace("mins", "min")
+    payload = payload.replace("lunch", "lonche").replace("lonch", "lonche").replace("lonce", "lonche")
+
+    # split site by 'lonche'
+    if "lonche" not in payload:
+        return None
+
+    before, after = payload.split("lonche", 1)
+    site = after.strip().title()
+
+    parts = before.strip().split()
+
+    # formats supported:
+    # 8:00 am 5:30 pm 30
+    # 8:00am 5:30pm 30
+    # 8:00-5:30 30min
+
+    try:
+        if "-" in parts[0]:
+            # format: 8:00-5:30
+            start, end = parts[0].split("-")
+            lunch = parts[1]
+        else:
+            # format: 8:00 am 5:30 pm 30
+            start = parts[0] + (" " + parts[1] if "am" in parts[1] or "pm" in parts[1] else "")
+            if "am" in parts[1] or "pm" in parts[1]:
+                end = parts[2] + " " + parts[3]
+                lunch = parts[4]
+            else:
+                end = parts[1]
+                lunch = parts[2]
+
+        lunch = int("".join([c for c in lunch if c.isdigit()]))
+
+        return start.strip(), end.strip(), lunch, site
+    except:
+        return None
+
 def help_text() -> str:
     return (
         "*Clock Agent Commands*\n\n"
@@ -492,6 +598,69 @@ def handle_stateful_reply(phone: str, text: str):
 
 
 def handle_command(phone: str, text: str):
+    # --- NEW: Turno single message ---
+    parsed_turno = parse_turno_simple(text)
+    if parsed_turno:
+        name = get_employee_name(phone)
+        if not name:
+            set_state(phone, "awaiting_name")
+            return "First register your name. Send your full name."
+
+        if get_open_shift(phone):
+            return "You already have an open shift. Send *out* first."
+
+        start_raw, end_raw, lunch_minutes, site = parsed_turno
+
+        in_dt = parse_iso(datetime.strptime(start_raw.replace("am"," am").replace("pm"," pm"), "%I:%M %p").replace(year=datetime.now().year, month=datetime.now().month, day=datetime.now().day).isoformat()) if ":" in start_raw else None
+
+        out_dt = parse_iso(datetime.strptime(end_raw.replace("am"," am").replace("pm"," pm"), "%I:%M %p").replace(year=datetime.now().year, month=datetime.now().month, day=datetime.now().day).isoformat()) if ":" in end_raw else None
+
+        if not in_dt or not out_dt:
+            return "Formato inválido. Usa: Turno 8:00 am 5:30 pm 30 lonche Rancho"
+
+        create_shift(phone, name, loc_description=site)
+
+        total_minutes = int((out_dt - in_dt).total_seconds() // 60) - lunch_minutes
+        total_minutes = max(total_minutes, 0)
+
+        conn = get_conn()
+        shift = conn.execute("SELECT id FROM shifts WHERE phone = ? AND status='open' ORDER BY id DESC LIMIT 1", (phone,)).fetchone()
+
+        conn.execute("""
+            UPDATE shifts SET
+            clock_out_utc = ?,
+            lunch_minutes = ?,
+            location_description_out = ?,
+            total_work_minutes = ?,
+            status = 'closed'
+            WHERE id = ?
+        """, (
+            out_dt.isoformat(),
+            lunch_minutes,
+            site,
+            total_minutes,
+            shift["id"],
+        ))
+
+        conn.commit()
+        conn.close()
+
+        return (
+            f"✅ Turno guardado en un mensaje.
+"
+            f"Entrada: *{in_dt.strftime('%I:%M %p')}*
+"
+            f"Salida: *{out_dt.strftime('%I:%M %p')}*
+"
+            f"Lonche: {lunch_minutes} min
+"
+            f"Lugar: {site}
+"
+            f"Total trabajado: *{fmt_minutes(total_minutes)}*"
+        )
+
+    lower = text.lower().strip()
+    name = get_employee_name(phone)
     lower = text.lower().strip()
     name = get_employee_name(phone)
 
