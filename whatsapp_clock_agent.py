@@ -560,7 +560,7 @@ def handle_stateful_reply(phone: str, text: str):
             return "Send your full name to complete registration."
         set_employee_name(phone, name)
         clear_state(phone)
-        return f"Perfect. You are registered as *{name}*. Now send *in* to clock in."
+        return f"Perfecto. Te registraste como *{name}*. Envia tu turno Ejemplo ( Turno 8:00am 4:30pm 30min lonche Rastrillar."
 
     if current == "awaiting_in_description":
         name = get_employee_name(phone) or "Employee"
@@ -628,7 +628,7 @@ def handle_command(phone: str, text: str):
         return help_text()
     if lower == "start":
         set_state(phone, "awaiting_name")
-        return "Send your full name to register this WhatsApp number."
+        return "Envia tu Nombre y apellido para registrar este numero de Whatsapp."
     if lower == "status":
         shift = get_open_shift(phone)
         if not shift:
@@ -686,7 +686,7 @@ def handle_command(phone: str, text: str):
         for row in rows:
             lines.append(f"• {row['employee_name'] or row['phone']} | {row['date_local']} | {fmt_minutes(row['total_work_minutes'] or 0)}")
         return "\n".join(lines)
-    return f"I did not understand that.\n\n{help_text()}"
+    return f"No entiendo eso.\n\n{help_text()}"
 
 
 # -----------------------------
