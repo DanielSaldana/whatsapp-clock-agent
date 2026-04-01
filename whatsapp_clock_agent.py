@@ -1,7 +1,6 @@
 import io
 import os
 import sqlite3
-from zoneinfo import ZoneInfo
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -200,9 +199,8 @@ def fmt_dt(iso_value: str) -> str:
     dt = parse_iso(iso_value)
     if not dt:
         return "-"
+    return dt.strftime("%Y-%m-%d %I:%M %p UTC")
 
-    local_dt = dt.astimezone(ZoneInfo("America/Denver"))
-    return local_dt.strftime("%Y-%m-%d %I:%M %p")
 
 def fmt_minutes(total_minutes: int) -> str:
     total_minutes = int(total_minutes or 0)
@@ -512,9 +510,71 @@ def save_location_to_open_shift(phone: str, lat: float, lng: float):
 
 
 def handle_stateful_reply(phone: str, text: str):
+    manual_out_lunch_reply = handle_manual_out_state(phone, text)
+    if manual_out_lunch_reply:
+        return manual_out_lunch_reply
+
+    manual_out_description_reply = handle_manual_out_description_state(phone, text)
+    if manual_out_description_reply:
+        return manual_out_description_reply
+
     state = get_state(phone)
     if not state:
         return None
+
+    current = state["state"]
+
+    if current == "awaiting_name":
+        name = text.strip()
+        if not name:
+            return "Send your full name to complete registration."
+        set_employee_name(phone, name)
+        clear_state(phone)
+        return f"Perfect. You are registered as *{name}*. Now send *in* to clock in."
+
+    if current == "awaiting_in_description":
+        name = get_employee_name(phone) or "Employee"
+        create_shift(phone, name, loc_description=text)
+        clear_state(phone)
+        return (
+            f"✅ Clock in saved for *{name}*.
+"
+            f"Site: {text or 'Not provided'}
+"
+            "Now send your WhatsApp location if you want GPS attached."
+        )
+
+    if current == "awaiting_out_lunch":
+        try:
+            lunch_minutes = int(text)
+            if lunch_minutes < 0 or lunch_minutes > 240:
+                return "Send lunch as minutes only, for example: 30"
+        except ValueError:
+            return "Send lunch as minutes only, for example: 30"
+
+        set_state(phone, "awaiting_out_description", str(lunch_minutes))
+        return "Got it. Now send the location description for clock out. Example: *Warehouse B*"
+
+    if current == "awaiting_out_description":
+        try:
+            lunch_minutes = int(state["temp_value"] or "0")
+        except ValueError:
+            lunch_minutes = 0
+        total = close_shift(phone, lunch_minutes=lunch_minutes, loc_description=text)
+        clear_state(phone)
+        if total is None:
+            return "No open shift found. Send *in* first."
+        return (
+            f"✅ Clock out saved.
+"
+            f"Lunch: {lunch_minutes} min
+"
+            f"Site: {text or 'Not provided'}
+"
+            f"Worked: *{fmt_minutes(total)}*"
+        )
+
+    return None
 
     current = state["state"]
 
@@ -566,12 +626,243 @@ def handle_stateful_reply(phone: str, text: str):
     return None
 
 
+def parse_manual_time(raw: str, base_date: str):
+    raw = normalize_text(raw).lower()
+    if not raw:
+        return None
+
+    normalized = (
+        raw.replace("a.m.", "am")
+        .replace("p.m.", "pm")
+        .replace("a.m", "am")
+        .replace("p.m", "pm")
+        .replace(" am", "am")
+        .replace(" pm", "pm")
+    )
+
+    patterns = [
+        "%H:%M",
+        "%I:%M%p",
+        "%I:%M %p",
+        "%I%p",
+        "%I %p",
+        "%H%M",
+    ]
+
+    for pattern in patterns:
+        try:
+            parsed = datetime.strptime(normalized, pattern)
+            base = datetime.strptime(base_date, "%Y-%m-%d")
+            return base.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
+        except ValueError:
+            continue
+    return None
+
+
+def extract_turno_payload(payload: str):
+    original = normalize_text(payload)
+    lowered = original.lower()
+
+    normalized = lowered
+    replacements = {
+        "minutos": "min",
+        "mins": "min",
+        "minuto": "min",
+        "min": "min",
+        "lonch": "lonche",
+        "lonce": "lonche",
+        "lunch": "lonche",
+        "lounche": "lonche",
+        "lonchee": "lonche",
+        "lonhce": "lonche",
+    }
+    for old, new in replacements.items():
+        normalized = normalized.replace(old, new)
+
+    normalized = normalized.replace("–", "-").replace("—", "-")
+    tokens = normalized.split()
+
+    if not tokens:
+        return None
+
+    site = ""
+    lunch_minutes = None
+    in_raw = None
+    out_raw = None
+
+    lonche_index = None
+    for i, token in enumerate(tokens):
+        if token == "lonche":
+            lonche_index = i
+            break
+
+    if lonche_index is not None:
+        before = tokens[:lonche_index]
+        after = tokens[lonche_index + 1 :]
+        site = " ".join(after).strip()
+    else:
+        before = tokens
+
+    cleaned_before = []
+    for token in before:
+        if token.endswith("min") and token[:-3].isdigit():
+            lunch_minutes = int(token[:-3])
+        elif token.isdigit() and lunch_minutes is None and len(cleaned_before) >= 2:
+            lunch_minutes = int(token)
+        else:
+            cleaned_before.append(token)
+
+    before = cleaned_before
+
+    if before:
+        first = before[0]
+        if "-" in first and not first.startswith("-") and not first.endswith("-"):
+            left, right = first.split("-", 1)
+            in_raw = left
+            out_raw = right
+            if len(before) > 1 and before[1] in {"am", "pm"}:
+                in_raw += before[1]
+                if len(before) > 2 and before[2] in {"am", "pm"}:
+                    out_raw += before[2]
+            elif len(before) > 1 and (before[1].endswith("am") or before[1].endswith("pm")):
+                out_raw += before[1]
+        elif len(before) >= 4:
+            in_raw = " ".join(before[:2])
+            out_raw = " ".join(before[2:4])
+        elif len(before) >= 2 and "-" in " ".join(before[:2]):
+            compact = " ".join(before[:2])
+            left, right = compact.split("-", 1)
+            in_raw = left.strip()
+            out_raw = right.strip()
+
+    if lunch_minutes is None:
+        for token in tokens:
+            digits = "".join(ch for ch in token if ch.isdigit())
+            if digits and (token.endswith("min") or token == digits):
+                lunch_minutes = int(digits)
+                break
+
+    if not in_raw or not out_raw or lunch_minutes is None:
+        return None
+
+    return {
+        "in_raw": in_raw.strip(),
+        "out_raw": out_raw.strip(),
+        "lunch_minutes": lunch_minutes,
+        "site": site,
+    }
+
+    patterns = [
+        "%H:%M",
+        "%I:%M%p",
+        "%I:%M %p",
+        "%I%p",
+        "%I %p",
+    ]
+
+    for pattern in patterns:
+        try:
+            parsed = datetime.strptime(raw, pattern)
+            base = datetime.strptime(base_date, "%Y-%m-%d")
+            return base.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
+        except ValueError:
+            continue
+    return None
+
+
+def create_shift_at_time(phone: str, employee_name: str, clock_in_dt, loc_description: str = "", lat=None, lng=None):
+    db_execute(
+        """
+        INSERT INTO shifts(
+            phone, employee_name, date_local, clock_in_utc,
+            in_lat, in_lng, location_description_in, status
+        )
+        VALUES(?, ?, ?, ?, ?, ?, ?, 'open')
+        """,
+        (
+            phone,
+            employee_name,
+            clock_in_dt.strftime("%Y-%m-%d"),
+            clock_in_dt.replace(tzinfo=timezone.utc).isoformat(),
+            lat,
+            lng,
+            loc_description,
+        ),
+        commit=True,
+    )
+
+
+def close_shift_at_time(phone: str, clock_out_dt, lunch_minutes: int = 0, notes: str = "", loc_description: str = "", lat=None, lng=None):
+    open_shift = get_open_shift(phone)
+    if not open_shift:
+        return None
+
+    clock_in = datetime.fromisoformat(open_shift["clock_in_utc"])
+    if clock_in.tzinfo is not None:
+        clock_in = clock_in.astimezone(timezone.utc).replace(tzinfo=None)
+
+    total_minutes = int((clock_out_dt - clock_in).total_seconds() // 60) - int(lunch_minutes)
+    total_minutes = max(total_minutes, 0)
+
+    db_execute(
+        """
+        UPDATE shifts
+        SET clock_out_utc = ?,
+            lunch_minutes = ?,
+            out_lat = ?,
+            out_lng = ?,
+            location_description_out = ?,
+            notes = ?,
+            total_work_minutes = ?,
+            status = 'closed'
+        WHERE id = ?
+        """,
+        (
+            clock_out_dt.replace(tzinfo=timezone.utc).isoformat(),
+            int(lunch_minutes),
+            lat,
+            lng,
+            loc_description,
+            notes,
+            total_minutes,
+            open_shift["id"],
+        ),
+        commit=True,
+    )
+    return total_minutes
+
+
 def handle_command(phone: str, text: str):
     lower = text.lower().strip()
     name = get_employee_name(phone)
 
     if lower in {"help", "menu", "ayuda"}:
-        return help_text()
+        return (
+            help_text()
+            + "
+
+*Offline Pro*
+"
+            + "You can also send manual times if there was no signal:
+"
+            + "in 8:00 am
+"
+            + "out 5:30 pm
+"
+            + "latein 8:00 am Job Site 4
+"
+            + "lateout 5:30 pm 30 Warehouse B
+"
+            + "shift 8:00 am 5:30 pm 30 Warehouse B
+"
+            + "turno 8:00 am 5:30 pm 30 lonche Rancho
+"
+            + "turno 8:00am 5:30pm 30min lonche Rancho
+"
+            + "turno 8:00-5:30 30min lonche Rancho
+"
+            + "turno 8 530 30 lonche Rancho"
+        )
 
     if lower == "start":
         set_state(phone, "awaiting_name")
@@ -582,9 +873,12 @@ def handle_command(phone: str, text: str):
         if not shift:
             return "You do not have an open shift. Send *in* to clock in."
         return (
-            f"Open shift found for *{shift['employee_name'] or 'Employee'}*.\n"
-            f"Date: {shift['date_local']}\n"
-            f"Clock in: {shift['clock_in_utc']} UTC\n"
+            f"Open shift found for *{shift['employee_name'] or 'Employee'}*.
+"
+            f"Date: {shift['date_local']}
+"
+            f"Clock in: {shift['clock_in_utc']} UTC
+"
             f"Site: {shift['location_description_in'] or 'Not provided'}"
         )
 
@@ -597,11 +891,186 @@ def handle_command(phone: str, text: str):
         set_state(phone, "awaiting_in_description")
         return "Send the work location description for clock in. Example: *Job Site 4*"
 
+    if lower.startswith("in "):
+        if not name:
+            set_state(phone, "awaiting_name")
+            return "First register your name. Send your full name."
+        if get_open_shift(phone):
+            return "You already have an open shift. Send *status* or *out*."
+        manual_dt = parse_manual_time(text[3:].strip(), local_date_string())
+        if not manual_dt:
+            return "Use a valid manual time, for example: *in 8:00 am*"
+        create_shift_at_time(phone, name, manual_dt)
+        return f"✅ Manual clock in saved at *{manual_dt.strftime('%I:%M %p')}*. Send *site Warehouse A* if you want to add the location description."
+
+    if lower.startswith("latein "):
+        if not name:
+            set_state(phone, "awaiting_name")
+            return "First register your name. Send your full name."
+        if get_open_shift(phone):
+            return "You already have an open shift. Send *status* or *out*."
+        payload = text[7:].strip()
+        pieces = payload.split(" ")
+        if len(pieces) < 2:
+            return "Use: *latein 8:00 am Job Site 4*"
+        time_guess = " ".join(pieces[:2])
+        site = " ".join(pieces[2:]).strip()
+        manual_dt = parse_manual_time(time_guess, local_date_string())
+        if not manual_dt:
+            return "Use: *latein 8:00 am Job Site 4*"
+        create_shift_at_time(phone, name, manual_dt, loc_description=site)
+        return f"✅ Offline clock in saved at *{manual_dt.strftime('%I:%M %p')}* for *{site or 'No site'}*."
+
     if lower == "out":
         if not get_open_shift(phone):
             return "No open shift found. Send *in* first."
         set_state(phone, "awaiting_out_lunch")
         return "Send lunch minutes only. Example: *30*"
+
+    if lower.startswith("out "):
+        if not get_open_shift(phone):
+            return "No open shift found. Send *in* first."
+        manual_dt = parse_manual_time(text[4:].strip(), local_date_string())
+        if not manual_dt:
+            return "Use a valid manual time, for example: *out 5:30 pm*"
+        set_state(phone, "awaiting_manual_out_lunch", manual_dt.strftime("%Y-%m-%d %H:%M"))
+        return "Manual clock out time saved. Now send lunch minutes only. Example: *30*"
+
+    if lower.startswith("lateout "):
+        if not get_open_shift(phone):
+            return "No open shift found. Send *in* first."
+        payload = text[8:].strip()
+        parts = payload.split(" ")
+        if len(parts) < 4:
+            return "Use: *lateout 5:30 pm 30 Warehouse B*"
+        time_guess = " ".join(parts[:2])
+        lunch_guess = parts[2]
+        site = " ".join(parts[3:]).strip()
+        manual_dt = parse_manual_time(time_guess, local_date_string())
+        if not manual_dt:
+            return "Use: *lateout 5:30 pm 30 Warehouse B*"
+        try:
+            lunch_minutes = int(lunch_guess)
+        except ValueError:
+            return "Use: *lateout 5:30 pm 30 Warehouse B*"
+        total = close_shift_at_time(phone, manual_dt, lunch_minutes=lunch_minutes, loc_description=site)
+        if total is None:
+            return "No open shift found. Send *in* first."
+        return (
+            f"✅ Offline clock out saved at *{manual_dt.strftime('%I:%M %p')}*.
+"
+            f"Lunch: {lunch_minutes} min
+"
+            f"Site: {site or 'Not provided'}
+"
+            f"Worked: *{fmt_minutes(total)}*"
+        )
+
+        if lower.startswith("shift "):
+        if not name:
+            set_state(phone, "awaiting_name")
+            return "First register your name. Send your full name."
+        if get_open_shift(phone):
+            return "You already have an open shift. Send *status* or *out* before using *shift*."
+
+        payload = text[6:].strip()
+        parts = payload.split()
+        if len(parts) < 6:
+            return "Use: *shift 8:00 am 5:30 pm 30 Warehouse B*"
+
+        in_time_guess = " ".join(parts[:2])
+        out_time_guess = " ".join(parts[2:4])
+        lunch_guess = parts[4]
+        site = " ".join(parts[5:]).strip()
+
+        in_dt = parse_manual_time(in_time_guess, local_date_string())
+        out_dt = parse_manual_time(out_time_guess, local_date_string())
+        if not in_dt or not out_dt:
+            return "Use: *shift 8:00 am 5:30 pm 30 Warehouse B*"
+
+        try:
+            lunch_minutes = int(lunch_guess)
+        except ValueError:
+            return "Use: *shift 8:00 am 5:30 pm 30 Warehouse B*"
+
+        if out_dt <= in_dt:
+            return "Clock out time must be later than clock in time."
+
+        create_shift_at_time(phone, name, in_dt, loc_description=site)
+        total = close_shift_at_time(phone, out_dt, lunch_minutes=lunch_minutes, loc_description=site)
+        if total is None:
+            return "Could not save the shift. Try again."
+
+        return (
+            f"✅ Shift saved in one message.
+"
+            f"In: *{in_dt.strftime('%I:%M %p')}*
+"
+            f"Out: *{out_dt.strftime('%I:%M %p')}*
+"
+            f"Lunch: {lunch_minutes} min
+"
+            f"Site: {site or 'Not provided'}
+"
+            f"Worked: *{fmt_minutes(total)}*"
+        )
+
+        if lower.startswith("turno "):
+        if not name:
+            set_state(phone, "awaiting_name")
+            return "First register your name. Send your full name."
+        if get_open_shift(phone):
+            return "You already have an open shift. Send *status* or *out* before using *turno*."
+
+        parsed = extract_turno_payload(text[6:])
+        if not parsed:
+            return (
+                "Usa algo como:
+"
+                "*Turno 8:00 am 5:30 pm 30 lonche Rancho*
+"
+                "*Turno 8:00am 5:30pm 30min lonche Rancho*
+"
+                "*Turno 8:00-5:30 30min lonche Rancho*
+"
+                "*Turno 8 530 30 lonche Rancho*"
+            )
+
+        in_dt = parse_manual_time(parsed["in_raw"], local_date_string())
+        out_dt = parse_manual_time(parsed["out_raw"], local_date_string())
+        lunch_minutes = parsed["lunch_minutes"]
+        site = parsed["site"]
+
+        if not in_dt or not out_dt:
+            return (
+                "No entendí bien la hora. Usa algo como:
+"
+                "*Turno 8:00 am 5:30 pm 30 lonche Rancho*
+"
+                "o *Turno 8:00-5:30 30min lonche Rancho*"
+            )
+
+        if out_dt <= in_dt:
+            return "La hora de salida debe ser después de la entrada."
+
+        create_shift_at_time(phone, name, in_dt, loc_description=site)
+        total = close_shift_at_time(phone, out_dt, lunch_minutes=lunch_minutes, loc_description=site)
+        if total is None:
+            return "No pude guardar el turno. Intenta otra vez."
+
+        return (
+            f"✅ Turno guardado en un mensaje.
+"
+            f"Entrada: *{in_dt.strftime('%I:%M %p')}*
+"
+            f"Salida: *{out_dt.strftime('%I:%M %p')}*
+"
+            f"Lonche: {lunch_minutes} min
+"
+            f"Lugar: {site or 'No especificado'}
+"
+            f"Total trabajado: *{fmt_minutes(total)}*"
+        )
 
     if lower.startswith("lunch "):
         try:
@@ -648,16 +1117,65 @@ def handle_command(phone: str, text: str):
         rows = latest_closed_shifts(limit=10)
         if not rows:
             return "No closed shifts yet."
-        lines = ["*Latest closed shifts*\n"]
+        lines = ["*Latest closed shifts*
+"]
         for row in rows:
             lines.append(
                 f"• {row['employee_name'] or row['phone']} | {row['date_local']} | {fmt_minutes(row['total_work_minutes'] or 0)}"
             )
-        return "\n".join(lines)
+        return "
+".join(lines)
 
     return (
-        "I did not understand that.\n\n"
+        "I did not understand that.
+
+"
         f"{help_text()}"
+    )
+
+
+def handle_manual_out_state(phone: str, text: str):(phone: str, text: str):
+    state = get_state(phone)
+    if not state or state["state"] != "awaiting_manual_out_lunch":
+        return None
+
+    try:
+        lunch_minutes = int(text.strip())
+    except ValueError:
+        return "Send lunch as minutes only, for example: 30"
+
+    manual_dt = datetime.strptime(state["temp_value"], "%Y-%m-%d %H:%M")
+    set_state(phone, "awaiting_manual_out_description", f"{state['temp_value']}|{lunch_minutes}")
+    return f"Got it. Now send the location description for manual clock out at *{manual_dt.strftime('%I:%M %p')}*."
+
+
+def handle_manual_out_description_state(phone: str, text: str):
+    state = get_state(phone)
+    if not state or state["state"] != "awaiting_manual_out_description":
+        return None
+
+    raw = state["temp_value"] or ""
+    try:
+        dt_raw, lunch_raw = raw.split("|", 1)
+        manual_dt = datetime.strptime(dt_raw, "%Y-%m-%d %H:%M")
+        lunch_minutes = int(lunch_raw)
+    except Exception:
+        clear_state(phone)
+        return "Manual clock out data expired. Please send *out 5:30 pm* again."
+
+    total = close_shift_at_time(phone, manual_dt, lunch_minutes=lunch_minutes, loc_description=text)
+    clear_state(phone)
+    if total is None:
+        return "No open shift found. Send *in* first."
+
+    return (
+        f"✅ Manual clock out saved at *{manual_dt.strftime('%I:%M %p')}*.
+"
+        f"Lunch: {lunch_minutes} min
+"
+        f"Site: {text or 'Not provided'}
+"
+        f"Worked: *{fmt_minutes(total)}*"
     )
 
 
