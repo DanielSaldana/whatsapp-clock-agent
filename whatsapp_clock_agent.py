@@ -842,17 +842,16 @@ def export_xlsx():
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-@app.route('/reset-db')
+@app.route("/reset-db")
 def reset_db():
-    token = request.args.get('token')
+    token = request.args.get("token")
 
     if token != os.getenv("ADMIN_TOKEN"):
         return "Unauthorized", 403
 
-    db = get_db()
-    db.execute("DELETE FROM shifts")
-    db.execute("DELETE FROM employees")
-    db.commit()
+    db_execute("DELETE FROM shifts", commit=True)
+    db_execute("DELETE FROM employees", commit=True)
+    db_execute("DELETE FROM conversation_state", commit=True)
 
     return "✅ Database reset successful"
 
