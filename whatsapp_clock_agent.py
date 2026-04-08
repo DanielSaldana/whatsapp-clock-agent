@@ -18,7 +18,7 @@ DB_PATH = os.getenv("DB_PATH", "timeclock.db")
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 ADMIN_NUMBERS = {n.strip() for n in os.getenv("ADMIN_NUMBERS", "").split(",") if n.strip()}
 TIMEZONE_LABEL = os.getenv("TIMEZONE_LABEL", "America/Denver")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "change-this-admin-token")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "mi-dashboard-2026")
 
 app = Flask(__name__)
 
