@@ -800,7 +800,7 @@ def whatsapp_webhook():
             to=phone,
             body=msg
         )
-        return ("", 200)
+        return Response("OK", status=200)
 
     # 💬 TEXT
     if text:
@@ -811,7 +811,7 @@ def whatsapp_webhook():
                 to=phone,
                 body=state_reply
             )
-            return ("", 200)
+            return Response("OK", status=200)
 
         reply = handle_command(phone, text)
         client.messages.create(
@@ -819,7 +819,7 @@ def whatsapp_webhook():
             to=phone,
             body=reply
         )
-        return ("", 200)
+        return Response("OK", status=200)
 
     # 🧠 DEFAULT
     client.messages.create(
@@ -827,7 +827,7 @@ def whatsapp_webhook():
         to=phone,
         body="Send *help* to see available commands."
     )
-    return ("", 200)
+    return Response("OK", status=200)
 
 
 init_db()
