@@ -663,16 +663,13 @@ def handle_command(phone: str, text: str):
     if lower in {"help", "menu", "ayuda"}:
         return help_text()
     if lower.startswith("start"):
-    name = text.replace("start", "").strip()
-
-    if not name:
-        set_state(phone, "awaiting_name")
-        return "Envia tu Nombre y apellido"
-
-    set_employee_name(phone, name)
-    create_shift(phone, name, loc_description="Auto")
-
-    return f"✅ Registrado como {name} y turno iniciado"
+        name = text.replace("start", "").strip()
+        if not name:
+            set_state(phone, "awaiting_name")
+            return "Envia tu Nombre y apellido"
+        set_employee_name(phone, name)
+        create_shift(phone, name, loc_description="Auto")
+        return f"✅ Registrado como {name} y turno iniciado"
     if lower == "status":
         shift = get_open_shift(phone)
         if not shift:
