@@ -780,6 +780,7 @@ def reset_db():
 # ================================
 # 🚀 WEBHOOK (ARREGLADO)
 # ================================
+from twilio.twiml.messaging_response import MessagingResponseb
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook():
     print("🔥 HIT /whatsapp")
@@ -790,45 +791,29 @@ def whatsapp_webhook():
     phone = from_number(form)
     text = incoming_text(form)
 
+    resp = MessagingResponse()
+
     # 📍 LOCATION
     if is_location_message(form):
         lat, lng = parse_whatsapp_location(form)
         _, msg = save_location_to_open_shift(phone, lat, lng)
-
-        client.messages.create(
-            from_=TWILIO_WHATSAPP_NUMBER,
-            to=phone,
-            body=msg
-        )
-        return Response("OK", status=200)
+        resp.message(msg)
+        return str(resp)
 
     # 💬 TEXT
     if text:
         state_reply = handle_stateful_reply(phone, text)
         if state_reply:
-            client.messages.create(
-                from_=TWILIO_WHATSAPP_NUMBER,
-                to=phone,
-                body=state_reply
-            )
-            return Response("OK", status=200)
+            resp.message(state_reply)
+            return str(resp)
 
         reply = handle_command(phone, text)
-        client.messages.create(
-            from_=TWILIO_WHATSAPP_NUMBER,
-            to=phone,
-            body=reply
-        )
-        return Response("OK", status=200)
+        resp.message(reply)
+        return str(resp)
 
     # 🧠 DEFAULT
-    client.messages.create(
-        from_=TWILIO_WHATSAPP_NUMBER,
-        to=phone,
-        body="Send *help* to see available commands."
-    )
-    return Response("OK", status=200)
-
+    resp.message("Send *help* to see available commands.")
+    return str(resp)
 
 init_db()
 
