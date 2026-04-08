@@ -23,14 +23,21 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "mi-dashboard-2026")
 app = Flask(__name__)
 
 # ================================
-# 🔑 TWILIO (NUEVO)
+# 🔑 TWILIO
 # ================================
 ACCOUNT_SID = os.getenv("ACCOUNT_SID")
 AUTH_TOKEN = os.getenv("AUTH_TOKEN")
-client = Client(ACCOUNT_SID, AUTH_TOKEN)
-
-# 👉 TU NÚMERO NUEVO
 TWILIO_WHATSAPP_NUMBER = "whatsapp:+19705405717"
+
+# Cliente Twilio lazy: se inicializa solo si se necesita (evita crash al arrancar)
+_twilio_client = None
+def get_twilio_client():
+    global _twilio_client
+    if _twilio_client is None:
+        if not ACCOUNT_SID or not AUTH_TOKEN:
+            raise RuntimeError("ACCOUNT_SID y AUTH_TOKEN no están configurados como variables de entorno.")
+        _twilio_client = Client(ACCOUNT_SID, AUTH_TOKEN)
+    return _twilio_client
 
 
 # -----------------------------
@@ -300,18 +307,28 @@ def parse_turno_message(text: str):
 # Persistence helpers
 # -----------------------------
 def set_state(phone: str, state: str, temp_value: str = ""):
-    db_execute(
-        """
-        INSERT INTO conversation_state(phone, state, temp_value, updated_at_utc)
-        VALUES(?, ?, ?, ?)
-        ON CONFLICT(phone) DO UPDATE SET
-            state = excluded.state,
-            temp_value = excluded.temp_value,
-            updated_at_utc = excluded.updated_at_utc
-        """,
-        (phone, state, temp_value, utc_now_iso()),
-        commit=True,
-    )
+    if using_postgres():
+        db_execute(
+            """
+            INSERT INTO conversation_state(phone, state, temp_value, updated_at_utc)
+            VALUES(%s, %s, %s, %s)
+            ON CONFLICT(phone) DO UPDATE SET
+                state = EXCLUDED.state,
+                temp_value = EXCLUDED.temp_value,
+                updated_at_utc = EXCLUDED.updated_at_utc
+            """,
+            (phone, state, temp_value, utc_now_iso()),
+            commit=True,
+        )
+    else:
+        db_execute(
+            """
+            INSERT OR REPLACE INTO conversation_state(phone, state, temp_value, updated_at_utc)
+            VALUES(?, ?, ?, ?)
+            """,
+            (phone, state, temp_value, utc_now_iso()),
+            commit=True,
+        )
 
 
 def get_state(phone: str):
@@ -328,15 +345,25 @@ def get_employee_name(phone: str):
 
 
 def set_employee_name(phone: str, name: str):
-    db_execute(
-        """
-        INSERT INTO employees(phone, name)
-        VALUES(?, ?)
-        ON CONFLICT(phone) DO UPDATE SET name = excluded.name
-        """,
-        (phone, name),
-        commit=True,
-    )
+    if using_postgres():
+        db_execute(
+            """
+            INSERT INTO employees(phone, name)
+            VALUES(%s, %s)
+            ON CONFLICT(phone) DO UPDATE SET name = EXCLUDED.name
+            """,
+            (phone, name),
+            commit=True,
+        )
+    else:
+        db_execute(
+            """
+            INSERT OR REPLACE INTO employees(phone, name)
+            VALUES(?, ?)
+            """,
+            (phone, name),
+            commit=True,
+        )
 
 
 def get_open_shift(phone: str):
@@ -732,7 +759,107 @@ def dashboard():
     rows = fetch_dashboard_shifts(employee=employee, date_from=date_from, date_to=date_to)
     summary = build_dashboard_summary(rows)
 
-    html = """..."""  # (sin cambios, lo dejé igual que tuyo)
+    html = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clock Agent Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #f4f6f9; color: #333; }
+  header { background: #1a73e8; color: white; padding: 16px 24px; }
+  header h1 { font-size: 1.4rem; }
+  .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+  .cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .card { background: white; border-radius: 8px; padding: 20px 24px; flex: 1; min-width: 160px;
+          box-shadow: 0 1px 4px rgba(0,0,0,.1); text-align: center; }
+  .card .num { font-size: 2rem; font-weight: bold; color: #1a73e8; }
+  .card .lbl { font-size: 0.85rem; color: #666; margin-top: 4px; }
+  .filters { background: white; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;
+             box-shadow: 0 1px 4px rgba(0,0,0,.1); display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  .filters label { font-size: 0.8rem; font-weight: bold; color: #555; display: block; margin-bottom: 4px; }
+  .filters input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem; }
+  .filters button { padding: 8px 20px; background: #1a73e8; color: white; border: none;
+                    border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+  .filters button:hover { background: #1558b0; }
+  .export-btn { padding: 8px 18px; background: #34a853; color: white; border: none;
+                border-radius: 6px; cursor: pointer; font-size: 0.9rem; text-decoration: none; }
+  table { width: 100%; background: white; border-radius: 8px; border-collapse: collapse;
+          box-shadow: 0 1px 4px rgba(0,0,0,.1); overflow: hidden; font-size: 0.88rem; }
+  th { background: #1a73e8; color: white; padding: 10px 12px; text-align: left; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #f8f9ff; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: bold; }
+  .badge-open { background: #fff3cd; color: #856404; }
+  .badge-closed { background: #d1e7dd; color: #0f5132; }
+  .empty { text-align: center; padding: 40px; color: #999; }
+</style>
+</head>
+<body>
+<header><h1>⏱ Clock Agent Dashboard</h1></header>
+<div class="container">
+  <div class="cards">
+    <div class="card"><div class="num">{{ summary.unique_employees }}</div><div class="lbl">Empleados</div></div>
+    <div class="card"><div class="num">{{ summary.open_shifts }}</div><div class="lbl">Turnos Abiertos</div></div>
+    <div class="card"><div class="num">{{ summary.closed_shifts }}</div><div class="lbl">Turnos Cerrados</div></div>
+    <div class="card"><div class="num">{{ worked_hours }}</div><div class="lbl">Horas Trabajadas</div></div>
+  </div>
+
+  <div class="filters">
+    <form method="get" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;width:100%">
+      <input type="hidden" name="token" value="{{ token }}">
+      <div><label>Empleado</label><input type="text" name="employee" value="{{ employee }}" placeholder="Nombre o teléfono"></div>
+      <div><label>Desde</label><input type="date" name="date_from" value="{{ date_from }}"></div>
+      <div><label>Hasta</label><input type="date" name="date_to" value="{{ date_to }}"></div>
+      <button type="submit">🔍 Filtrar</button>
+      <a class="export-btn" href="/export.xlsx?token={{ token }}&employee={{ employee }}&date_from={{ date_from }}&date_to={{ date_to }}">⬇ Excel</a>
+    </form>
+  </div>
+
+  {% if rows %}
+  <table>
+    <thead>
+      <tr>
+        <th>Empleado</th><th>Teléfono</th><th>Fecha</th>
+        <th>Entrada</th><th>Salida</th><th>Lonche</th>
+        <th>Trabajado</th><th>Lugar Entrada</th><th>Lugar Salida</th>
+        <th>Notas</th><th>Estado</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td>{{ row['employee_name'] or '-' }}</td>
+        <td>{{ row['phone'] }}</td>
+        <td>{{ row['date_local'] or '-' }}</td>
+        <td>{{ fmt_dt(row['clock_in_utc']) }}</td>
+        <td>{{ fmt_dt(row['clock_out_utc']) }}</td>
+        <td>{{ row['lunch_minutes'] or 0 }} min</td>
+        <td>{{ fmt_minutes(row['total_work_minutes'] or 0) }}</td>
+        <td>{{ row['location_description_in'] or '-' }}</td>
+        <td>{{ row['location_description_out'] or '-' }}</td>
+        <td>{{ row['notes'] or '-' }}</td>
+        <td>
+          {% if row['status'] == 'open' %}
+            <span class="badge badge-open">Abierto</span>
+          {% else %}
+            <span class="badge badge-closed">Cerrado</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">📭 No se encontraron registros con los filtros actuales.</div>
+  {% endif %}
+</div>
+</body>
+</html>
+"""
 
     return render_template_string(
         html,
