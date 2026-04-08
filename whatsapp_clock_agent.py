@@ -767,35 +767,148 @@ def dashboard():
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clock Agent Dashboard</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; background: #f4f6f9; color: #333; }
-  header { background: #1a73e8; color: white; padding: 16px 24px; }
-  header h1 { font-size: 1.4rem; }
-  .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
-  .cards { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
-  .card { background: white; border-radius: 8px; padding: 20px 24px; flex: 1; min-width: 160px;
-          box-shadow: 0 1px 4px rgba(0,0,0,.1); text-align: center; }
-  .card .num { font-size: 2rem; font-weight: bold; color: #1a73e8; }
-  .card .lbl { font-size: 0.85rem; color: #666; margin-top: 4px; }
-  .filters { background: white; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;
-             box-shadow: 0 1px 4px rgba(0,0,0,.1); display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-  .filters label { font-size: 0.8rem; font-weight: bold; color: #555; display: block; margin-bottom: 4px; }
-  .filters input { padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem; }
-  .filters button { padding: 8px 20px; background: #1a73e8; color: white; border: none;
-                    border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
-  .filters button:hover { background: #1558b0; }
-  .export-btn { padding: 8px 18px; background: #34a853; color: white; border: none;
-                border-radius: 6px; cursor: pointer; font-size: 0.9rem; text-decoration: none; }
-  table { width: 100%; background: white; border-radius: 8px; border-collapse: collapse;
-          box-shadow: 0 1px 4px rgba(0,0,0,.1); overflow: hidden; font-size: 0.88rem; }
-  th { background: #1a73e8; color: white; padding: 10px 12px; text-align: left; }
-  td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #f8f9ff; }
-  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.78rem; font-weight: bold; }
-  .badge-open { background: #fff3cd; color: #856404; }
-  .badge-closed { background: #d1e7dd; color: #0f5132; }
-  .empty { text-align: center; padding: 40px; color: #999; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: #0b0f1a;
+  color: #e6edf3;
+}
+
+header {
+  background: rgba(20, 25, 40, 0.7);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  padding: 18px 28px;
+}
+
+header h1 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 30px auto;
+  padding: 0 20px;
+}
+
+.cards {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 30px;
+}
+
+.card {
+  background: rgba(20, 25, 40, 0.8);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 14px;
+  padding: 24px;
+  flex: 1;
+  min-width: 180px;
+  backdrop-filter: blur(10px);
+  transition: 0.2s;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+}
+
+.card .num {
+  font-size: 2.2rem;
+  font-weight: bold;
+  color: #4da3ff;
+}
+
+.card .lbl {
+  font-size: 0.85rem;
+  color: #8b949e;
+  margin-top: 6px;
+}
+
+.filters {
+  background: rgba(20, 25, 40, 0.8);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 24px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.filters input {
+  background: #0b0f1a;
+  border: 1px solid rgba(255,255,255,0.1);
+  color: white;
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.filters button {
+  background: #4da3ff;
+  border: none;
+  color: white;
+  padding: 8px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.export-btn {
+  background: #22c55e;
+  padding: 8px 16px;
+  border-radius: 6px;
+  color: white;
+  text-decoration: none;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(20, 25, 40, 0.8);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+th {
+  background: #111827;
+  color: #9ca3af;
+  padding: 12px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+td {
+  padding: 12px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+
+tr:hover td {
+  background: rgba(255,255,255,0.03);
+}
+
+.badge-open {
+  background: rgba(250,204,21,0.15);
+  color: #facc15;
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.badge-closed {
+  background: rgba(34,197,94,0.15);
+  color: #22c55e;
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.empty {
+  text-align: center;
+  padding: 50px;
+  color: #6b7280;
+}
 </style>
 </head>
 <body>
