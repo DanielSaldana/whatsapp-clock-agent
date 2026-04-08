@@ -2,7 +2,7 @@ import io
 import os
 import sqlite3
 from datetime import datetime, timezone
-
+from flask import request, Response
 from flask import Flask, request, jsonify, Response, render_template_string, send_file
 from openpyxl import Workbook
 from twilio.twiml.messaging_response import MessagingResponse
@@ -857,29 +857,37 @@ def reset_db():
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook():
+    print("🔥 HIT /whatsapp")  # DEBUG
+
     form = request.form
+    print("FORM:", form)  # DEBUG
+
     phone = from_number(form)
     text = incoming_text(form)
+
     response = MessagingResponse()
 
+    # 📍 LOCATION
     if is_location_message(form):
         lat, lng = parse_whatsapp_location(form)
         _, msg = save_location_to_open_shift(phone, lat, lng)
         response.message(msg)
-        return str(response)
+        return Response(str(response), mimetype="application/xml")
 
+    # 💬 TEXT
     if text:
         state_reply = handle_stateful_reply(phone, text)
         if state_reply:
             response.message(state_reply)
-            return str(response)
+            return Response(str(response), mimetype="application/xml")
+
         reply = handle_command(phone, text)
         response.message(reply)
-        return str(response)
+        return Response(str(response), mimetype="application/xml")
 
+    # 🧠 DEFAULT
     response.message("Send *help* to see available commands.")
-    return str(response)
-
+    return Response(str(response), mimetype="application/xml")
 
 init_db()
 
