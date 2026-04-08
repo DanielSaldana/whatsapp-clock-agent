@@ -780,7 +780,7 @@ def reset_db():
 # ================================
 # 🚀 WEBHOOK (ARREGLADO)
 # ================================
-from twilio.twiml.messaging_response import MessagingResponseb
+from twilio.twiml.messaging_response import MessagingResponse
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook():
     print("🔥 HIT /whatsapp")
