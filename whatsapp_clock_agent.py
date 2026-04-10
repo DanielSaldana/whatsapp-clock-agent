@@ -213,7 +213,7 @@ def fmt_minutes(total_minutes: int) -> str:
 
 
 def admin_authorized(req) -> bool:
-    token = req.args.get("token") or req.headers.get("X-Admin-Token", "")
+    token = req.args.get("token") or req.form.get("token") or req.headers.get("X-Admin-Token", "")
     return bool(ADMIN_TOKEN) and token == ADMIN_TOKEN
 
 
@@ -764,6 +764,20 @@ def dashboard():
     rows = fetch_dashboard_shifts(employee=employee, date_from=date_from, date_to=date_to)
     summary = build_dashboard_summary(rows)
 
+@app.route("/create-employee", methods=["POST"])
+def create_employee():
+    if not admin_authorized(request):
+        return Response("Unauthorized", status=401)
+
+    name = request.form.get("name", "").strip()
+    phone = request.form.get("phone", "").strip()
+
+    if not name or not phone:
+        return "Missing data", 400
+
+    set_employee_name(phone, name)
+
+    return "OK"
     html = """
 <!DOCTYPE html>
 <html lang="es">
@@ -919,6 +933,24 @@ tr:hover td {
 <body>
 <header><h1>⏱ Clock Agent Dashboard</h1></header>
 <div class="container">
+    <div style="margin-bottom:20px;">
+  <form method="post" action="/create-employee" style="display:flex;gap:10px;flex-wrap:wrap;">
+    
+    <input type="hidden" name="token" value="{{ token }}">
+
+    <input type="text" name="name" placeholder="Nombre del empleado"
+      style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;">
+
+    <input type="text" name="phone" placeholder="whatsapp:+1..."
+      style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;">
+
+    <button type="submit"
+      style="background:#4da3ff;border:none;padding:10px 16px;border-radius:6px;color:white;cursor:pointer;">
+      ➕ Crear empleado
+    </button>
+
+  </form>
+</div>
   <div class="cards">
     <div class="card"><div class="num">{{ summary.unique_employees }}</div><div class="lbl">Empleados</div></div>
     <div class="card"><div class="num">{{ summary.open_shifts }}</div><div class="lbl">Turnos Abiertos</div></div>
@@ -1021,6 +1053,16 @@ def reset_db():
     db_execute("DELETE FROM conversation_state", commit=True)
     return "✅ Database reset successful"
 
+@app.route("/reset-shifts")
+def reset_shifts():
+    token = request.args.get("token")
+    if token != os.getenv("ADMIN_TOKEN"):
+        return "Unauthorized", 403
+
+    db_execute("DELETE FROM shifts", commit=True)
+    db_execute("DELETE FROM conversation_state", commit=True)
+
+    return "✅ Shifts reset only"
 
 # ================================
 # 🚀 WEBHOOK (ARREGLADO)
