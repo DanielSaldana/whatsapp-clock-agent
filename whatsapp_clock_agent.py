@@ -763,21 +763,6 @@ def dashboard():
     date_to = normalize_text(request.args.get("date_to", ""))
     rows = fetch_dashboard_shifts(employee=employee, date_from=date_from, date_to=date_to)
     summary = build_dashboard_summary(rows)
-
-@app.route("/create-employee", methods=["POST"])
-def create_employee():
-    if not admin_authorized(request):
-        return Response("Unauthorized", status=401)
-
-    name = request.form.get("name", "").strip()
-    phone = request.form.get("phone", "").strip()
-
-    if not name or not phone:
-        return "Missing data", 400
-
-    set_employee_name(phone, name)
-
-    return "OK"
     html = """
 <!DOCTYPE html>
 <html lang="es">
