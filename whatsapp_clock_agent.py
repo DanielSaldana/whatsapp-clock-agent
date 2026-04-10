@@ -1026,7 +1026,20 @@ def export_xlsx():
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+@app.route("/create-employee", methods=["POST"])
+def create_employee():
+    if not admin_authorized(request):
+        return Response("Unauthorized", status=401)
 
+    name = request.form.get("name", "").strip()
+    phone = request.form.get("phone", "").strip()
+
+    if not name or not phone:
+        return "Missing data", 400
+
+    set_employee_name(phone, name)
+
+    return "OK"
 
 @app.route("/reset-db")
 def reset_db():
