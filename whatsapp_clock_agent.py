@@ -932,25 +932,26 @@ tr:hover td {
       <div><label>Desde</label><input type="date" name="date_from" value="{{ date_from }}"></div>
       <div><label>Hasta</label><input type="date" name="date_to" value="{{ date_to }}"></div>
       <button type="submit">🔍 Filtrar</button>
+      <a class="export-btn" href="/export.xlsx?token={{ token }}&employee={{ employee }}&date_from={{ date_from }}&date_to={{ date_to }}">⬇ Excel</a>
+    </form>
+  </div>
+    <!-- 🔥 FORM CREAR EMPLEADO (SEPARADO) -->
+<div style="margin-bottom:20px;">
+  <form method="post" action="/create-employee?token={{ token }}" style="display:flex;gap:10px;flex-wrap:wrap;">
 
-          <div style="margin-bottom:20px;">
-  <form method="post" action="/create-employee" style="display:flex;gap:10px;flex-wrap:wrap;">
-    
-    <input type="hidden" name="token" value="{{ token }}">
     <input type="text" name="name" placeholder="Nombre del empleado"
       style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;">
-    <input type="text" name="phone" placeholder="whatsapp:+1..."
+
+    <input type="text" name="phone" placeholder="+1..."
       style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;">
+
     <button type="submit"
       style="background:#4da3ff;border:none;padding:10px 16px;border-radius:6px;color:white;cursor:pointer;">
       ➕ Crear empleado
     </button>
+
   </form>
 </div>
-      <a class="export-btn" href="/export.xlsx?token={{ token }}&employee={{ employee }}&date_from={{ date_from }}&date_to={{ date_to }}">⬇ Excel</a>
-    </form>
-  </div>
-
   {% if rows %}
   <table>
     <thead>
