@@ -1030,19 +1030,14 @@ def create_employee():
 
     name = request.form.get("name", "").strip()
     phone = request.form.get("phone", "").strip()
-
-# 🔥 NORMALIZAR SIEMPRE
-if phone:
+    if not name or not phone:
+        return "Missing data", 400
+    
     phone = phone.replace(" ", "")
     if not phone.startswith("+"):
         phone = "+" + phone
     if not phone.startswith("whatsapp:"):
         phone = "whatsapp:" + phone
-        
-
-    if not name or not phone:
-        return "Missing data", 400
-
     set_employee_name(phone, name)
 
     return "OK"
