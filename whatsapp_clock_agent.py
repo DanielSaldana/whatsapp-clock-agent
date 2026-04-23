@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from flask import Flask, request, jsonify, Response, render_template_string, send_file
 from openpyxl import Workbook
 from twilio.rest import Client  # 👈 NUEVO
+from zoneinfo import ZoneInfo
+LOCAL_TZ = ZoneInfo("America/Denver")
 
 try:
     import psycopg
@@ -180,12 +182,16 @@ def init_db():
 # -----------------------------
 # Utilities
 # -----------------------------
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+def local_now():
+    return datetime.now(LOCAL_TZ)
 
 def local_date_string() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
+    return local_now().strftime("%Y-%m-%d")
 
 
 def normalize_text(value: str) -> str:
@@ -202,7 +208,7 @@ def fmt_dt(iso_value: str) -> str:
     dt = parse_iso(iso_value)
     if not dt:
         return "-"
-    return dt.strftime("%Y-%m-%d %I:%M %p UTC")
+    return dt.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %I:%M %p")
 
 
 def fmt_minutes(total_minutes: int) -> str:
@@ -243,8 +249,8 @@ def time_to_today(raw: str):
     parsed = parse_time_token(raw)
     if not parsed:
         return None
-    now = datetime.now()
-    return datetime(now.year, now.month, now.day, parsed.hour, parsed.minute)
+    now = local_now()
+    return datetime(now.year, now.month, now.day, parsed.hour, parsed.minute, tzinfo=LOCAL_TZ)
 
 
 def parse_turno_message(text: str):
@@ -389,7 +395,18 @@ def create_shift(phone: str, employee_name: str, loc_description: str = "", lat=
 
 
 def create_shift_manual(phone: str, employee_name: str, clock_in_dt: datetime, clock_out_dt: datetime, lunch_minutes: int, site: str):
-    total_minutes = max(int((clock_out_dt - clock_in_dt).total_seconds() // 60) - int(lunch_minutes), 0)
+
+    # 🔥 asegurar que son hora local (Denver)
+    if clock_in_dt.tzinfo is None:
+        clock_in_dt = clock_in_dt.replace(tzinfo=LOCAL_TZ)
+    if clock_out_dt.tzinfo is None:
+        clock_out_dt = clock_out_dt.replace(tzinfo=LOCAL_TZ)
+
+    total_minutes = max(
+        int((clock_out_dt - clock_in_dt).total_seconds() // 60) - int(lunch_minutes),
+        0
+    )
+
     db_execute(
         """
         INSERT INTO shifts(
@@ -402,9 +419,14 @@ def create_shift_manual(phone: str, employee_name: str, clock_in_dt: datetime, c
         (
             phone,
             employee_name,
-            clock_in_dt.strftime("%Y-%m-%d"),
-            clock_in_dt.replace(tzinfo=timezone.utc).isoformat(),
-            clock_out_dt.replace(tzinfo=timezone.utc).isoformat(),
+
+            # ✅ fecha REAL local
+            clock_in_dt.astimezone(LOCAL_TZ).strftime("%Y-%m-%d"),
+
+            # ✅ conversión REAL a UTC
+            clock_in_dt.astimezone(timezone.utc).isoformat(),
+            clock_out_dt.astimezone(timezone.utc).isoformat(),
+
             int(lunch_minutes),
             site,
             site,
@@ -412,6 +434,7 @@ def create_shift_manual(phone: str, employee_name: str, clock_in_dt: datetime, c
         ),
         commit=True,
     )
+
     return total_minutes
 
 
@@ -420,7 +443,7 @@ def close_shift(phone: str, lunch_minutes: int = 0, notes: str = "", loc_descrip
     if not open_shift:
         return None
     clock_in = datetime.fromisoformat(open_shift["clock_in_utc"])
-    clock_out = datetime.fromisoformat(utc_now_iso())
+    clock_out = datetime.now(timezone.utc)
     total_minutes = max(int((clock_out - clock_in).total_seconds() // 60) - int(lunch_minutes), 0)
     db_execute(
         """
@@ -949,7 +972,33 @@ tr:hover td {
       style="background:#4da3ff;border:none;padding:10px 16px;border-radius:6px;color:white;cursor:pointer;">
       ➕ Crear empleado
     </button>
+  </form>
+</div>
+    <div style="margin-bottom:20px;">
+  <form method="post" action="/create-shift-manual?token={{ token }}" style="display:flex;gap:10px;flex-wrap:wrap;">
+    
+    <input type="text" name="name" placeholder="Nombre"
+      style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;">
 
+    <input type="text" name="phone" placeholder="+1970..."
+      style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;">
+
+    <input type="text" name="start_time" placeholder="8:00am"
+      style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;">
+
+    <input type="text" name="end_time" placeholder="5:30pm"
+      style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;">
+
+    <input type="number" name="lunch_minutes" placeholder="30"
+      style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;width:100px;">
+
+    <input type="text" name="site" placeholder="Rancho"
+      style="padding:10px;border-radius:6px;border:none;background:#111827;color:white;">
+
+    <button type="submit"
+      style="background:#22c55e;border:none;padding:10px 16px;border-radius:6px;color:white;cursor:pointer;">
+      ➕ Crear turno manual
+    </button>
   </form>
 </div>
   {% if rows %}
@@ -1042,6 +1091,47 @@ def create_employee():
     set_employee_name(phone, name)
 
     return "OK"
+
+@app.route("/create-shift-manual", methods=["POST"])
+def create_shift_manual_route():
+    if not admin_authorized(request):
+        return Response("Unauthorized", status=401)
+
+    phone = request.form.get("phone", "").strip()
+    name = request.form.get("name", "").strip()
+    start_raw = request.form.get("start_time", "").strip()
+    end_raw = request.form.get("end_time", "").strip()
+    lunch_raw = request.form.get("lunch_minutes", "").strip()
+    site = request.form.get("site", "").strip()
+
+    if not phone or not name or not start_raw or not end_raw:
+        return "Missing data", 400
+
+    # normalizar teléfono
+    phone = phone.replace(" ", "")
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    if not phone.startswith("whatsapp:"):
+        phone = "whatsapp:" + phone
+
+    try:
+        lunch_minutes = int(lunch_raw or "0")
+    except ValueError:
+        return "Lunch must be a number", 400
+
+    start_dt = time_to_today(start_raw)
+    end_dt = time_to_today(end_raw)
+
+    if not start_dt or not end_dt:
+        return "Invalid time format", 400
+
+    if end_dt <= start_dt:
+        return "End time must be later than start time", 400
+
+    set_employee_name(phone, name)
+    create_shift_manual(phone, name, start_dt, end_dt, lunch_minutes, site)
+
+    return jsonify({"ok": True})
 
 @app.route("/reset-db")
 def reset_db():
