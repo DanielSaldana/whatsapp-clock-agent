@@ -201,7 +201,14 @@ def normalize_text(value: str) -> str:
 def parse_iso(value: str):
     if not value:
         return None
-    return datetime.fromisoformat(value)
+
+    dt = datetime.fromisoformat(value)
+
+    # 🔥 si no tiene timezone, asumir UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return dt
 
 
 def fmt_dt(iso_value: str) -> str:
